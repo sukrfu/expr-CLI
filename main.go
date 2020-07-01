@@ -14,26 +14,37 @@ import (
 
 type Obj struct {
 	Name   string
-	Friend *Obj
+	Man *Person
 	Id     int64
+}
+type Person struct {
+	Name string
+	Friend *Person
+	Age int
+	Phone string
 }
 
 var obj = Obj{
 	Name: "wuwj",
-	Id:   22,
-	Friend: &Obj{
-		Name: "hello",
-		Id:   3,
+	Id: 22,
+	Man: &Person{
+		Name:  "nick",
+		Age:   25,
+		Friend: &Person{
+			Name:   "tom",
+			Age:    19,
+			Phone:  "666666",
+		},
+		Phone: "123456",
 	},
 }
 
-var mapObj = map[string]string{
-	"hello": "123",
-	"test": "456",
+var mapObj = map[string]int{
+	"hello": 123,
+	"test": 456,
 }
 
 var sliceObj = []int{1,2,3,4,5}
-
 
 var globalTestMap = map[string]interface{}{
 	"map": mapObj,
@@ -51,11 +62,11 @@ const (
 
 var target = obj
 
-const Delim = '\n'
-
+// 记录command光标前一个单词
 var lastWord string
 
-func completer(d prompt.Document) []prompt.Suggest {
+// 操作命令的提示
+func operationCompleter(d prompt.Document) []prompt.Suggest{
 	ops := []prompt.Suggest{
 		{Text: "print", Description: "打印当前操作对象"},
 		{Text: "get", Description: "获取操作对象某个字段"},
@@ -63,45 +74,62 @@ func completer(d prompt.Document) []prompt.Suggest {
 		{Text: "delete", Description: "删除操作对象某个字段(map或slice)"},
 		{Text: "quit", Description: "退出"},
 	}
+	return prompt.FilterHasPrefix(ops, d.GetWordBeforeCursor(), true)
+}
+
+// map or struct 的字段提示
+func fieldNameCompleter(d prompt.Document,object interface{}) []prompt.Suggest{
+	wordBeforeCursor := d.GetWordBeforeCursor()
+	nestFieldNames := strings.Split(wordBeforeCursor, ".")
+	switch reflect.TypeOf(object).Kind() {
+	case reflect.Struct:
+		dummyObject := object
+		if len(nestFieldNames) != 1 {
+			for index, fieldName := range nestFieldNames{
+				if index == len(nestFieldNames)-1{
+					continue
+				}
+				realObject := reflect.Indirect(reflect.ValueOf(dummyObject))
+				nestField := realObject.FieldByName(fieldName)
+				if !nestField.IsValid() {
+					return nilCompleter(d)
+				}
+				dummyObject = nestField.Interface()
+			}
+		}
+		return prompt.FilterHasPrefix(
+			getFieldSuggest(getStructFieldNames(dummyObject)),
+			nestFieldNames[len(nestFieldNames)-1], true)
+	case reflect.Map:
+		return prompt.FilterHasPrefix(
+			getFieldSuggest(getMapKeyNames(object)),
+			wordBeforeCursor, true)
+	}
+	return nilCompleter(d)
+}
 
 
+// 空提示
+func nilCompleter(d prompt.Document)[]prompt.Suggest{
+	return prompt.FilterHasPrefix(nil, d.GetWordBeforeCursor(), true)
+}
+
+// command 提示(main)
+func completer(d prompt.Document) []prompt.Suggest {
 	if strings.Index(d.TextBeforeCursor(), " ") < 0 {
-		return prompt.FilterHasPrefix(ops, d.GetWordBeforeCursor(), true)
+		return operationCompleter(d)
 	}else {
 		lastWord = d.TextBeforeCursor()[:strings.LastIndex(d.TextBeforeCursor(), " ")]
 	}
-
-	if reflect.TypeOf(target).Kind() != reflect.Struct {
-		return nil
+	// 数据操作命令之后提示字段
+	if isDataOperation(lastWord){
+		return fieldNameCompleter(d, target)
 	}
-
-	// must be struct
-	fieldNames := getFieldName(target)
-	wordBeforeCursor := d.GetWordBeforeCursor()
-	fieldNameSuggest := getFieldSuggest(fieldNames)
-
-	if strings.Contains(wordBeforeCursor, ".") {
-		currFieldName := wordBeforeCursor[:strings.Index(wordBeforeCursor,".")]
-		currField, err := expr.GetField(target, currFieldName)
-		if err != nil {
-			fmt.Printf("field %s get failed, err: %s\n", currFieldName, err)
-			os.Exit(0)
-		}
-		if currField.Type().Kind() != reflect.Ptr {
-			return prompt.FilterHasPrefix(nil, wordBeforeCursor, true)
-		}
-		fieldNames = getFieldName(currField.Interface())
-		fieldNameSuggest = getFieldSuggest(fieldNames)
-		return prompt.FilterHasPrefix(fieldNameSuggest, d.GetWordBeforeCursorUntilSeparator("."), true)
-	}
-	if isStructOps(lastWord){
-		return prompt.FilterHasPrefix(fieldNameSuggest, wordBeforeCursor, true)
-	}
-	return prompt.FilterHasPrefix(nil, wordBeforeCursor, true)
+	return nilCompleter(d)
 }
 
-func isStructOps(lastWord string) bool{
-	if lastWord == GET || lastWord == SET || lastWord == DEL{
+func isDataOperation(word string) bool{
+	if word == GET || word == SET || word == DEL{
 		return true
 	}
 	return false
@@ -157,9 +185,6 @@ func executorFunc(command string) {
 		log.Debugf("field %s delete success", fieldName)
 	case PRT:
 		fmt.Printf("obj: %+v\n", target)
-	//case USE:
-	//	objType := fieldName
-	//	target = globalTestMap[objType]
 	default:
 		cmd := exec.Command("/bin/sh", "-c", command)
 		cmd.Stdin = os.Stdin
@@ -178,66 +203,12 @@ func main() {
 		completer,
 		prompt.OptionTitle("expr: interactive Expr CLI"),
 		prompt.OptionPrefix(">>> "),
-		prompt.OptionInputTextColor(prompt.Black),
+		prompt.OptionInputTextColor(prompt.DarkGreen),
 	)
 	p.Run()
 }
-//
-//func main() {
-//	fmt.Println("************************************")
-//	fmt.Println("command: ops + [name] + [value]")
-//	fmt.Println("get: 获取操作对象某个字段")
-//	fmt.Println("set: 设置操作对象某个字段上的值")
-//	fmt.Println("del: 删除操作对象某个字段(map或slice)")
-//	fmt.Println("use: 切换操作对象(map, slice, struct)")
-//	fmt.Println("prt: 打印当前操作对象")
-//	fmt.Println("************************************")
-//
-//	reader := bufio.NewReader(os.Stdin)
-//	for {
-//		command, err := reader.ReadString(Delim)
-//		command = removeDelim(command)
-//		if err != nil {
-//			continue
-//		}
-//
-//		ops, fieldName, value := getOpsAndFieldNameAndValue(command)
-//		ops = strings.ToLower(ops)
-//		switch ops {
-//		case GET:
-//			field, err := expr.GetField(&target, fieldName)
-//			if err != nil {
-//				log.Debugf("field %s not found", fieldName)
-//				continue
-//			}
-//			fmt.Printf("field %s: %+v\n", fieldName, field)
-//		case SET:
-//			if reflect.TypeOf(target).Elem().Kind()==reflect.Int {
-//				value,err = strconv.Atoi(value.(string))
-//				if err != nil {
-//					fmt.Printf("field %s set failed, err: %s\n", fieldName, err)
-//					continue
-//				}
-//			}
-//			expr.SetField(&target, fieldName, value, nil)
-//		case DEL:
-//			err := expr.Del(&target, fieldName)
-//			if err != nil {
-//				fmt.Printf("field %s delete failed, err: %s\n", fieldName, err)
-//				continue
-//			}
-//			log.Debugf("field %s delete success", fieldName)
-//		case PRT:
-//			fmt.Printf("obj: %+v\n", target)
-//		//case USE:
-//		//	objType := fieldName
-//		//	target = globalTestMap[objType]
-//		default:
-//			log.Debugf("operation %s invalid", ops)
-//		}
-//	}
-//}
 
+// 从命令中获取操作符，字段名，值（设置时）
 func getOpsAndFieldNameAndValue(token string) (ops, fieldName string, value interface{}){
 	values := strings.Split(token, " ")
 	if len(values) < 2 {
@@ -249,24 +220,35 @@ func getOpsAndFieldNameAndValue(token string) (ops, fieldName string, value inte
 	return values[0], values[1], values[2]
 }
 
-func removeDelim(s string) string {
-	return s[: strings.Index(s, string(Delim))]
-}
-
-// 获取结构体中的所有字段名
-func getFieldName(structName interface{}) []string  {
-	t := reflect.TypeOf(structName)
+// 获取结构体中的所有不为空的字段名
+func getStructFieldNames(structObject interface{}) []string  {
+	t := reflect.TypeOf(structObject)
+	v := reflect.ValueOf(structObject)
+	v = reflect.Indirect(v)
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {
-		log.Println("Check type error not Struct")
-		return nil
+		//log.Println("Check type error not Struct")
+		return []string{}
 	}
 	fieldNum := t.NumField()
 	result := make([]string, 0, fieldNum)
 	for i:= 0; i < fieldNum; i++ {
+		if v.FieldByName(t.Field(i).Name).IsZero() {
+			continue
+		}
 		result = append(result, t.Field(i).Name)
 	}
 	return result
+}
+
+// 获取map的所有key名，[$KeyName]格式
+func getMapKeyNames(mapObject interface{}) []string {
+	v := reflect.ValueOf(mapObject)
+	keys := make([]string, 0, len(v.MapKeys()))
+	for _, key := range v.MapKeys(){
+		keys = append(keys, fmt.Sprintf("[%s]", key.Interface().(string)))
+	}
+	return keys
 }
