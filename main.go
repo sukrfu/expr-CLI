@@ -24,7 +24,7 @@ type Person struct {
 	Phone string
 }
 
-var obj = Obj{
+var obj = StructType{
 	Name: "wuwj",
 	Id: 22,
 	Man: &Person{
@@ -39,17 +39,23 @@ var obj = Obj{
 	},
 }
 
-var mapObj = map[string]int{
-	"hello": 123,
-	"test": 456,
+type MapType map[string]string
+
+type SliceType []string
+
+type StructType Obj
+
+var mapObj = MapType{
+	"hello": "123",
+	"test": "456",
 }
 
-var sliceObj = []int{1,2,3,4,5}
+var sliceObj = SliceType{"1","2","3","4","5"}
 
 var globalTestMap = map[string]interface{}{
 	"map": mapObj,
 	"struct": obj,
-	"slice": sliceObj,
+	"slice": &sliceObj,
 }
 
 const (
@@ -60,10 +66,99 @@ const (
 	USE string = "use"
 )
 
-var target = obj
+var target interface{} = obj
 
 // 记录command光标前一个单词
 var lastWord string
+
+func main() {
+	p := prompt.New(
+		executorFunc,
+		completer,
+		prompt.OptionTitle("expr: interactive Expr CLI"),
+		prompt.OptionPrefix(">>> "),
+		prompt.OptionInputTextColor(prompt.DarkGreen),
+	)
+	p.Run()
+}
+
+func executorFunc(command string) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return
+	} else if command == "quit" || command == "exit" {
+		fmt.Println("Bye!")
+		os.Exit(0)
+		return
+	}
+
+	ops, fieldName, value := getOpsAndFieldNameAndValue(command)
+	ops = strings.ToLower(ops)
+	switch ops {
+	case GET:
+		field, err := expr.GetField(&target, fieldName)
+		if err != nil {
+			log.Debugf("field %s not found", fieldName)
+			return
+		}
+		// todo: 删除log信息
+		fmt.Printf("field %s: %+v\n", fieldName, field)
+	case SET:
+		if reflect.TypeOf(target).Kind()==reflect.Slice &&
+			reflect.TypeOf(target).Elem().Kind()==reflect.Int {
+			var err error
+			value,err = strconv.Atoi(value.(string))
+			if err != nil {
+				// todo: 删除log信息
+				fmt.Printf("field %s set failed, err: %s\n", fieldName, err)
+				return
+			}
+		}
+		err := expr.SetField(&target, fieldName, value, nil)
+		if err != nil {
+			// todo: 删除log信息
+			fmt.Printf("field %s set failed, err: %s\n", fieldName, err)
+			return
+		}
+		fmt.Println("ok!")
+	case DEL:
+		err := expr.Del(&target, fieldName)
+		if err != nil {
+			fmt.Printf("field %s delete failed, err: %s\n", fieldName, err)
+			return
+		}
+		// todo: 删除log信息
+		fmt.Println("ok!")
+		log.Debugf("field %s delete success", fieldName)
+	case PRT:
+		fmt.Printf("obj: %+v\n", target)
+	case USE:
+		switch fieldName {
+		case "slice":
+			target = globalTestMap[fieldName]
+			fallthrough
+		case "map":
+			target = globalTestMap[fieldName]
+			fallthrough
+		case "struct":
+			target = globalTestMap[fieldName]
+			fallthrough
+		default:
+			// todo: 删除log信息
+			fmt.Println("ok!")
+		}
+	default:
+		cmd := exec.Command("/bin/sh", "-c", command)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			// todo: 删除log信息
+			fmt.Printf("Got error: %s\n", err.Error())
+		}
+	}
+	return
+}
 
 // 操作命令的提示
 func operationCompleter(d prompt.Document) []prompt.Suggest{
@@ -72,7 +167,11 @@ func operationCompleter(d prompt.Document) []prompt.Suggest{
 		{Text: "get", Description: "获取操作对象某个字段"},
 		{Text: "set", Description: "设置操作对象某个字段上的值"},
 		{Text: "delete", Description: "删除操作对象某个字段(map或slice)"},
+		{Text: "use", Description: "切换当前对象(slice, map, struct)"},
 		{Text: "quit", Description: "退出"},
+	}
+	if reflect.TypeOf(target).Kind() == reflect.Struct {
+		ops = append(ops[:3], ops[4:]...)
 	}
 	return prompt.FilterHasPrefix(ops, d.GetWordBeforeCursor(), true)
 }
@@ -108,6 +207,14 @@ func fieldNameCompleter(d prompt.Document,object interface{}) []prompt.Suggest{
 	return nilCompleter(d)
 }
 
+func objectNameCompleter(d prompt.Document) []prompt.Suggest{
+	objectSuggests := []prompt.Suggest{
+		{Text: "slice"},
+		{Text: "map"},
+		{Text: "struct"},
+	}
+	return prompt.FilterHasPrefix(objectSuggests, d.GetWordBeforeCursor(), true)
+}
 
 // 空提示
 func nilCompleter(d prompt.Document)[]prompt.Suggest{
@@ -125,14 +232,21 @@ func completer(d prompt.Document) []prompt.Suggest {
 	if isDataOperation(lastWord){
 		return fieldNameCompleter(d, target)
 	}
+	if isChangeOperation(lastWord) {
+		return objectNameCompleter(d)
+	}
 	return nilCompleter(d)
 }
 
-func isDataOperation(word string) bool{
-	if word == GET || word == SET || word == DEL{
+func isDataOperation(ops string) bool {
+	if ops == GET || ops == SET || ops == DEL{
 		return true
 	}
 	return false
+}
+
+func isChangeOperation(ops string) bool {
+	return ops == USE
 }
 
 func getFieldSuggest(fieldNames []string)[]prompt.Suggest{
@@ -143,69 +257,6 @@ func getFieldSuggest(fieldNames []string)[]prompt.Suggest{
 		})
 	}
 	return fieldNameSuggest
-}
-
-func executorFunc(command string) {
-	command = strings.TrimSpace(command)
-	if command == "" {
-		return
-	} else if command == "quit" || command == "exit" {
-		fmt.Println("Bye!")
-		os.Exit(0)
-		return
-	}
-
-	ops, fieldName, value := getOpsAndFieldNameAndValue(command)
-	ops = strings.ToLower(ops)
-	switch ops {
-	case GET:
-		field, err := expr.GetField(&target, fieldName)
-		if err != nil {
-			log.Debugf("field %s not found", fieldName)
-			return
-		}
-		fmt.Printf("field %s: %+v\n", fieldName, field)
-	case SET:
-		if reflect.TypeOf(target).Kind()==reflect.Slice &&
-			reflect.TypeOf(target).Elem().Kind()==reflect.Int {
-			var err error
-			value,err = strconv.Atoi(value.(string))
-			if err != nil {
-				fmt.Printf("field %s set failed, err: %s\n", fieldName, err)
-				return
-			}
-		}
-		expr.SetField(&target, fieldName, value, nil)
-	case DEL:
-		err := expr.Del(&target, fieldName)
-		if err != nil {
-			fmt.Printf("field %s delete failed, err: %s\n", fieldName, err)
-			return
-		}
-		log.Debugf("field %s delete success", fieldName)
-	case PRT:
-		fmt.Printf("obj: %+v\n", target)
-	default:
-		cmd := exec.Command("/bin/sh", "-c", command)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			fmt.Printf("Got error: %s\n", err.Error())
-		}
-	}
-	return
-}
-
-func main() {
-	p := prompt.New(
-		executorFunc,
-		completer,
-		prompt.OptionTitle("expr: interactive Expr CLI"),
-		prompt.OptionPrefix(">>> "),
-		prompt.OptionInputTextColor(prompt.DarkGreen),
-	)
-	p.Run()
 }
 
 // 从命令中获取操作符，字段名，值（设置时）

@@ -42,6 +42,7 @@ Thumbs.db
 
 # go pkg generated files #
 ######################
-src/*
 bin/*
 pkg/*
+src/*
+!/src/expr/*
