@@ -13,29 +13,37 @@ import (
 )
 
 type Obj struct {
-	Name   string
+	Name   *string
 	Man *Person
-	Id     int64
+	Id    *int
 }
 type Person struct {
-	Name string
+	Name *string
 	Friend *Person
-	Age int
-	Phone string
+	Age *int
+	Phone *string
 }
 
+var myName = "wuwj"
+var nickName = "nick"
+var tomName = "tom"
+var tomAge = 19
+var nickAge = 25
+var myAge = 22
+var nickPhone = "123456"
+var tomPhone = "666666"
 var obj = StructType{
-	Name: "wuwj",
-	Id: 22,
+	Name: &myName,
+	Id: &myAge,
 	Man: &Person{
-		Name:  "nick",
-		Age:   25,
+		Name:  &nickName,
+		Age:   &nickAge,
 		Friend: &Person{
-			Name:   "tom",
-			Age:    19,
-			Phone:  "666666",
+			Name:   &tomName,
+			Age:    &tomAge,
+			Phone:  &tomPhone,
 		},
-		Phone: "123456",
+		Phone: &nickPhone,
 	},
 }
 
@@ -55,7 +63,7 @@ var sliceObj = SliceType{"1","2","3","4","5"}
 var globalTestMap = map[string]interface{}{
 	"map": mapObj,
 	"struct": obj,
-	"slice": &sliceObj,
+	"slice": sliceObj,
 }
 
 const (
@@ -66,7 +74,7 @@ const (
 	USE string = "use"
 )
 
-var target interface{} = obj
+var target  interface{}= obj
 
 // 记录command光标前一个单词
 var lastWord string
@@ -96,7 +104,7 @@ func executorFunc(command string) {
 	ops = strings.ToLower(ops)
 	switch ops {
 	case GET:
-		field, err := expr.GetField(&target, fieldName)
+		field, err := expr.Get(&target, fieldName, strconv.Itoa(len(strings.Split(fieldName, "."))))
 		if err != nil {
 			log.Debugf("field %s not found", fieldName)
 			return
@@ -104,17 +112,8 @@ func executorFunc(command string) {
 		// todo: 删除log信息
 		fmt.Printf("field %s: %+v\n", fieldName, field)
 	case SET:
-		if reflect.TypeOf(target).Kind()==reflect.Slice &&
-			reflect.TypeOf(target).Elem().Kind()==reflect.Int {
-			var err error
-			value,err = strconv.Atoi(value.(string))
-			if err != nil {
-				// todo: 删除log信息
-				fmt.Printf("field %s set failed, err: %s\n", fieldName, err)
-				return
-			}
-		}
-		err := expr.SetField(&target, fieldName, value, nil)
+
+		err := expr.Set(&target, fieldName, value,nil, nil)
 		if err != nil {
 			// todo: 删除log信息
 			fmt.Printf("field %s set failed, err: %s\n", fieldName, err)
@@ -260,13 +259,13 @@ func getFieldSuggest(fieldNames []string)[]prompt.Suggest{
 }
 
 // 从命令中获取操作符，字段名，值（设置时）
-func getOpsAndFieldNameAndValue(token string) (ops, fieldName string, value interface{}){
+func getOpsAndFieldNameAndValue(token string) (ops, fieldName,value string){
 	values := strings.Split(token, " ")
 	if len(values) < 2 {
-		return values[0], "", nil
+		return values[0], "", ""
 	}
 	if len(values) < 3 {
-		return values[0], values[1], nil
+		return values[0], values[1], ""
 	}
 	return values[0], values[1], values[2]
 }

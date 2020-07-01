@@ -47,9 +47,12 @@ func nextPos(fieldName string) (pos int, slice bool) {
 func getNestField(s reflect.Value, fullName, fieldName string) (reflect.Value, error) {
 
 	//Make sure types are strcut or ptr
+	s = getElem(s)
+
 	// todo: 去掉外层interface包装
-	s = getElem(s)
-	s = getElem(s)
+	if s.Kind() == reflect.Interface {
+		s = s.Elem()
+	}
 	t := s.Kind()
 	fmt.Sprintf("Interface %v  kind %v ,fullName %v,fieldName %v.\n", s, t, fullName, fieldName)
 

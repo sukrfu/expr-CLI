@@ -33,8 +33,6 @@ func setField(v reflect.Value, fieldName, currName string, value interface{},
 	}
 
 	v = reflect.Indirect(v)
-	// todo: 去掉外层interface包装
-	v = getElem(v)
 
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()

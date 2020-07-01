@@ -32,7 +32,9 @@ func delField(v reflect.Value, fieldName, currName string) error {
 	// v 第一次指针转换
 	v = reflect.Indirect(v)
 	// todo: 去掉interface包装
-	v = getElem(v)
+	if v.Kind() == reflect.Interface {
+		v = v.Elem()
+	}
 	switch v.Kind() {
 	case reflect.Struct, reflect.Ptr:
 		currName, nextFieldName := getCurrAndNextFieldName(currName)
