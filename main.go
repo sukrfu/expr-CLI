@@ -13,43 +13,35 @@ import (
 )
 
 type Obj struct {
-	Name   *string
+	Name   string
 	Man *Person
-	Id    *int
+	Id    int
 }
 type Person struct {
-	Name *string
+	Name string
 	Friend *Person
-	Age *int
-	Phone *string
+	Age int
+	Phone string
 }
 
-var myName = "wuwj"
-var nickName = "nick"
-var tomName = "tom"
-var tomAge = 19
-var nickAge = 25
-var myAge = 22
-var nickPhone = "123456"
-var tomPhone = "666666"
-var obj = StructType{
-	Name: &myName,
-	Id: &myAge,
+var structObject = StructType{
+	Name: "wuwj",
+	Id: 22,
 	Man: &Person{
-		Name:  &nickName,
-		Age:   &nickAge,
+		Name:  "nick",
+		Age:   25,
 		Friend: &Person{
-			Name:   &tomName,
-			Age:    &tomAge,
-			Phone:  &tomPhone,
+			Name:   "tom",
+			Age:    19,
+			Phone:  "666666",
 		},
-		Phone: &nickPhone,
+		Phone: "123456",
 	},
 }
 
 type MapType map[string]string
 
-type SliceType []string
+type SliceType []int
 
 type StructType Obj
 
@@ -58,14 +50,15 @@ var mapObj = MapType{
 	"test": "456",
 }
 
-var sliceObj = SliceType{"1","2","3","4","5"}
+var sliceObj = SliceType{1,2,3,4,5}
 
-var globalTestMap = map[string]interface{}{
-	"map": mapObj,
-	"struct": obj,
-	"slice": sliceObj,
+var globalTestObjectMap = map[string]interface{}{
+	"map": &mapObj,
+	"struct": &structObject,
+	"slice": &sliceObj,
 }
 
+// 操作命令常量
 const (
 	GET string = "get"
 	SET string = "set"
@@ -74,7 +67,7 @@ const (
 	USE string = "use"
 )
 
-var target  interface{}= obj
+var currentObjectPtr interface{} = &structObject
 
 // 记录command光标前一个单词
 var lastWord string
@@ -113,7 +106,7 @@ func executorFunc(command string) {
 	ops = strings.ToLower(ops)
 	switch ops {
 	case GET:
-		field, err := expr.Get(&target, fieldName, strconv.Itoa(len(strings.Split(fieldName, "."))))
+		field, err := expr.Get(currentObjectPtr, fieldName, strconv.Itoa(len(strings.Split(fieldName, "."))))
 		if err != nil {
 			log.Debugf("field %s not found, err: %s\n", fieldName, err)
 			return
@@ -122,7 +115,7 @@ func executorFunc(command string) {
 		fmt.Printf("field %s: %+v\n", fieldName, field)
 	case SET:
 
-		err := expr.Set(&target, fieldName, value,nil, nil)
+		err := expr.Set(currentObjectPtr, fieldName, value,nil, nil)
 		if err != nil {
 			// todo: 删除log信息
 			fmt.Printf("field %s set failed, err: %s\n", fieldName, err)
@@ -130,7 +123,7 @@ func executorFunc(command string) {
 		}
 		fmt.Println("ok!")
 	case DEL:
-		err := expr.Del(&target, fieldName)
+		err := expr.Del(currentObjectPtr, fieldName)
 		if err != nil {
 			fmt.Printf("field %s delete failed, err: %s\n", fieldName, err)
 			return
@@ -139,17 +132,17 @@ func executorFunc(command string) {
 		fmt.Println("ok!")
 		log.Debugf("field %s delete success", fieldName)
 	case PRT:
-		fmt.Printf("obj: %+v\n", target)
+		fmt.Printf("current object: %+v\n", reflect.Indirect(reflect.ValueOf(currentObjectPtr)))
 	case USE:
 		switch fieldName {
 		case "slice":
-			target = globalTestMap[fieldName]
+			currentObjectPtr = globalTestObjectMap[fieldName]
 			fallthrough
 		case "map":
-			target = globalTestMap[fieldName]
+			currentObjectPtr = globalTestObjectMap[fieldName]
 			fallthrough
 		case "struct":
-			target = globalTestMap[fieldName]
+			currentObjectPtr = globalTestObjectMap[fieldName]
 			fallthrough
 		default:
 			// todo: 删除log信息
@@ -178,17 +171,21 @@ func operationCompleter(d prompt.Document) []prompt.Suggest{
 		{Text: "use", Description: "切换当前对象(slice, map, struct)"},
 		{Text: "quit", Description: "退出"},
 	}
-	if reflect.TypeOf(target).Kind() == reflect.Struct {
+	if getCurrentObjectType() == reflect.Struct {
 		ops = append(ops[:3], ops[4:]...)
 	}
 	return prompt.FilterHasPrefix(ops, d.GetWordBeforeCursor(), true)
+}
+
+func getCurrentObjectType() reflect.Kind{
+	return reflect.Indirect(reflect.ValueOf(currentObjectPtr)).Kind()
 }
 
 // map or struct 的字段提示
 func fieldNameCompleter(d prompt.Document,object interface{}) []prompt.Suggest{
 	wordBeforeCursor := d.GetWordBeforeCursor()
 	nestFieldNames := strings.Split(wordBeforeCursor, ".")
-	switch reflect.TypeOf(object).Kind() {
+	switch getCurrentObjectType() {
 	case reflect.Struct:
 		dummyObject := object
 		if len(nestFieldNames) != 1 {
@@ -238,7 +235,7 @@ func completer(d prompt.Document) []prompt.Suggest {
 	}
 	// 数据操作命令之后提示字段
 	if isDataOperation(lastWord){
-		return fieldNameCompleter(d, target)
+		return fieldNameCompleter(d, currentObjectPtr)
 	}
 	if isChangeOperation(lastWord) {
 		return objectNameCompleter(d)
@@ -304,7 +301,7 @@ func getStructFieldNames(structObject interface{}) []string  {
 
 // 获取map的所有key名，[$KeyName]格式
 func getMapKeyNames(mapObject interface{}) []string {
-	v := reflect.ValueOf(mapObject)
+	v := reflect.Indirect(reflect.ValueOf(mapObject))
 	keys := make([]string, 0, len(v.MapKeys()))
 	for _, key := range v.MapKeys(){
 		keys = append(keys, fmt.Sprintf("[%s]", key.Interface().(string)))
