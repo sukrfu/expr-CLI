@@ -207,7 +207,14 @@ func getFieldSliceIndex(fieldName string) (int, error) {
 	return -1, nil
 }
 
+
 func getFieldMapKey(fieldName string) (string, error) {
+	// todo: 需要处理不含有']'的输入
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Printf("field %s not found, err: %s", fieldName, err)
+		}
+	}()
 	if strings.Index(fieldName, "[") >= 0 {
 		key := fieldName[strings.Index(fieldName, "[")+1 : strings.Index(fieldName, "]")]
 		return key, nil

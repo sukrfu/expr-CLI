@@ -90,7 +90,16 @@ func main() {
 	p.Run()
 }
 
+func commandErrorHandler(){
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Printf("command error, err: %s\n", err)
+		}
+	}()
+}
+
 func executorFunc(command string) {
+	commandErrorHandler()
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return
