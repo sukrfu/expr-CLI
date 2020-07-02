@@ -45,4 +45,3 @@ Thumbs.db
 bin/*
 pkg/*
 src/*
-!/src/expr/*

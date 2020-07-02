@@ -1,15 +1,15 @@
 package main
 
 import (
-	"expr"
 	"fmt"
-	"github.com/c-bata/go-prompt"
-	log "github.com/sirupsen/logrus"
 	"os"
 	"os/exec"
 	"reflect"
 	"strconv"
 	"strings"
+	"github.com/c-bata/go-prompt"
+	"gitee.com/legou-lib/expr"
+	log "github.com/sirupsen/logrus"
 )
 
 type Obj struct {
@@ -106,7 +106,7 @@ func executorFunc(command string) {
 	case GET:
 		field, err := expr.Get(&target, fieldName, strconv.Itoa(len(strings.Split(fieldName, "."))))
 		if err != nil {
-			log.Debugf("field %s not found", fieldName)
+			log.Debugf("field %s not found, err: %s\n", fieldName, err)
 			return
 		}
 		// todo: 删除log信息
