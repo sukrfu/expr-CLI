@@ -10,16 +10,6 @@ import (
 	"strings"
 )
 
-// 操作命令常量
-const (
-	GET string = "get"
-	SET string = "set"
-	DEL string = "delete"
-	PRT string = "print"
-	USE string = "use"
-	QUIT string = "quit"
-)
-
 var currentObjectPtr SimpleData
 
 // 记录command光标前一个单词
@@ -42,8 +32,8 @@ func main() {
 		Coin:   66,
 		Friends: []*Player{player1},
 	}
-	registry.Register("player1", player1)
-	registry.Register("player2", player)
+	registry.Register("tom", player1)
+	registry.Register("nick", player)
 	registry.Register("player3", player)
 	registry.Register("player4", player)
 
@@ -65,12 +55,25 @@ func commandErrorHandler(){
 	}()
 }
 
+func printSysCmdHelp(){
+	fmt.Println("   list: 列出当前注册中心所有对象")
+	fmt.Println("   quit: 退出程序")
+	fmt.Println("command: [object_name].[ops] + [field_name] + [value]")
+}
+
 func executorFunc(command string) {
 	commandErrorHandler()
 	command = strings.TrimSpace(command)
-	if command == "" {
+	switch strings.ToLower(command) {
+	case "":
 		return
-	} else if strings.ToLower(command) == "quit"{
+	case "?":
+		printSysCmdHelp()
+		return
+	case "list":
+		fmt.Println(registry.GetAllNames())
+		return
+	case "quit":
 		fmt.Println("Bye!")
 		os.Exit(0)
 		return
@@ -102,23 +105,13 @@ func executorFunc(command string) {
 		fmt.Println("ok!")
 	case operation.PRT:
 		operation.Print(currentObjectPtr)
-	case operation.USE:
-		object := registry.GetObject(fieldName)
-		if object != nil  {
-			currentObjectPtr = object
-			fmt.Println("ok!")
-		}else{
-			fmt.Printf("object %s not found in registry\n", fieldName)
-		}
-	case operation.LIST:
-		fmt.Println(registry.GetAllNames())
 	default:
 		cmd := exec.Command("/bin/sh", "-c", command)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			fmt.Printf("Got error: %s\n", err.Error())
+			fmt.Println("   input ? for help")
 		}
 	}
 	return
@@ -131,13 +124,11 @@ func operationCompleter(d prompt.Document) []prompt.Suggest{
 		{Text: "get", Description: "获取操作对象某个字段"},
 		{Text: "set", Description: "设置操作对象某个字段上的值"},
 		{Text: "delete", Description: "删除操作对象某个字段(map或slice)"},
-		{Text: "use", Description: "切换当前对象"},
-		{Text: "quit", Description: "退出"},
 	}
 	if operation.GetObjectRuntimeType(currentObjectPtr) == reflect.Struct {
 		ops = append(ops[:3], ops[4:]...)
 	}
-	return prompt.FilterHasPrefix(ops, d.GetWordBeforeCursor(), true)
+	return prompt.FilterHasPrefix(ops, d.GetWordBeforeCursorUntilSeparator("."), true)
 }
 
 // map or struct 的字段提示
@@ -191,16 +182,20 @@ func nilCompleter(d prompt.Document)[]prompt.Suggest{
 func completer(d prompt.Document) []prompt.Suggest {
 
 	if strings.Index(d.TextBeforeCursor(), " ") < 0 {
-		return operationCompleter(d)
+		if strings.Count(d.TextBeforeCursor(), ".") == 1 {
+			currentObjectPtr = registry.GetObject(
+				d.TextBeforeCursor()[:strings.Index(d.TextBeforeCursor(), ".")])
+			return operationCompleter(d)
+		}
+		return objectNameCompleter(d)
 	}else {
-		lastWord = d.TextBeforeCursor()[:strings.LastIndex(d.TextBeforeCursor(), " ")]
+		lastWord = d.TextBeforeCursor()[
+		strings.Index(d.TextBeforeCursor(), ".")+1 :
+			strings.LastIndex(d.TextBeforeCursor(), " ")]
 	}
 	// 数据操作命令之后提示字段
 	if isDataOperation(lastWord){
 		return fieldNameCompleter(d, currentObjectPtr)
-	}
-	if isChangeOperation(lastWord) {
-		return objectNameCompleter(d)
 	}
 	return nilCompleter(d)
 }
@@ -211,11 +206,6 @@ func isDataOperation(ops string) bool {
 		return true
 	}
 	return false
-}
-
-func isChangeOperation(ops string) bool {
-	ops = strings.ToLower(ops)
-	return ops == operation.USE
 }
 
 func getFieldSuggest(fieldNames []string)[]prompt.Suggest{
@@ -232,13 +222,16 @@ func getFieldSuggest(fieldNames []string)[]prompt.Suggest{
 // 从命令中获取操作符，字段名，值（设置时）
 func getOpsAndFieldNameAndValue(token string) (ops, fieldName,value string){
 	values := strings.Split(token, " ")
+	if strings.Contains(values[0], ".") {
+		ops = strings.Split(values[0], ".")[1]
+	}
 	if len(values) < 2 {
-		return values[0], "", ""
+		return ops, "", ""
 	}
 	if len(values) < 3 {
-		return values[0], values[1], ""
+		return ops, values[1], ""
 	}
-	return values[0], values[1], values[2]
+	return ops, values[1], values[2]
 }
 
 // 获取结构体中的所有不为空的字段名
