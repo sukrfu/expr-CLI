@@ -30,6 +30,18 @@ value: eval字符串
 ---
 ### Examples
 
+#### 0.
+```
+player.print
+```
+output: 
+```
+    Name=tom
+    Id=654321
+    Coin=123
+    Friends len: 0
+```
+
 #### 1.
 ```
 player.get Name
