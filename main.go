@@ -2,61 +2,13 @@ package main
 
 import (
 	"fmt"
+	"github.com/c-bata/go-prompt"
+	log "github.com/sirupsen/logrus"
 	"os"
 	"os/exec"
 	"reflect"
-	"strconv"
 	"strings"
-	"github.com/c-bata/go-prompt"
-	"gitee.com/legou-lib/expr"
-	log "github.com/sirupsen/logrus"
 )
-
-type Obj struct {
-	Name   string
-	Man *Person
-	Id    int
-}
-type Person struct {
-	Name string
-	Friend *Person
-	Age int
-	Phone string
-}
-
-var structObject = StructType{
-	Name: "wuwj",
-	Id: 22,
-	Man: &Person{
-		Name:  "nick",
-		Age:   25,
-		Friend: &Person{
-			Name:   "tom",
-			Age:    19,
-			Phone:  "666666",
-		},
-		Phone: "123456",
-	},
-}
-
-type MapType map[string]string
-
-type SliceType []int
-
-type StructType Obj
-
-var mapObj = MapType{
-	"hello": "123",
-	"test": "456",
-}
-
-var sliceObj = SliceType{1,2,3,4,5}
-
-var globalTestObjectMap = map[string]interface{}{
-	"map": &mapObj,
-	"struct": &structObject,
-	"slice": &sliceObj,
-}
 
 // 操作命令常量
 const (
@@ -65,14 +17,36 @@ const (
 	DEL string = "delete"
 	PRT string = "print"
 	USE string = "use"
+	QUIT string = "quit"
 )
 
-var currentObjectPtr interface{} = &structObject
+var currentObjectPtr SimpleData
 
 // 记录command光标前一个单词
 var lastWord string
 
+var operation = NewSimpleDataOperation()
+
+var registry = NewRegistry()
+
 func main() {
+	player1 := &Player{
+		Name:    "tom",
+		Id:      "654321",
+		Coin:   123,
+		Friends: nil,
+	}
+	player := &Player{
+		Name:    "nick",
+		Id:      "12345",
+		Coin:   66,
+		Friends: []*Player{player1},
+	}
+	registry.Register("player1", player1)
+	registry.Register("player2", player)
+	registry.Register("player3", player)
+	registry.Register("player4", player)
+
 	p := prompt.New(
 		executorFunc,
 		completer,
@@ -96,7 +70,7 @@ func executorFunc(command string) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return
-	} else if command == "quit" || command == "exit" {
+	} else if strings.ToLower(command) == "quit"{
 		fmt.Println("Bye!")
 		os.Exit(0)
 		return
@@ -105,56 +79,45 @@ func executorFunc(command string) {
 	ops, fieldName, value := getOpsAndFieldNameAndValue(command)
 	ops = strings.ToLower(ops)
 	switch ops {
-	case GET:
-		field, err := expr.Get(currentObjectPtr, fieldName, strconv.Itoa(len(strings.Split(fieldName, "."))))
+	case operation.GET:
+		field, err := operation.Get(currentObjectPtr, fieldName)
 		if err != nil {
 			log.Debugf("field %s not found, err: %s\n", fieldName, err)
 			return
 		}
-		// todo: 删除log信息
 		fmt.Printf("field %s: %+v\n", fieldName, field)
-	case SET:
-
-		err := expr.Set(currentObjectPtr, fieldName, value,nil, nil)
+	case operation.SET:
+		err := operation.Set(currentObjectPtr, fieldName, value)
 		if err != nil {
-			// todo: 删除log信息
 			fmt.Printf("field %s set failed, err: %s\n", fieldName, err)
 			return
 		}
 		fmt.Println("ok!")
-	case DEL:
-		err := expr.Del(currentObjectPtr, fieldName)
+	case operation.DEL:
+		err := operation.Delete(currentObjectPtr, fieldName)
 		if err != nil {
 			fmt.Printf("field %s delete failed, err: %s\n", fieldName, err)
 			return
 		}
-		// todo: 删除log信息
 		fmt.Println("ok!")
-		log.Debugf("field %s delete success", fieldName)
-	case PRT:
-		fmt.Printf("current object: %+v\n", reflect.Indirect(reflect.ValueOf(currentObjectPtr)))
-	case USE:
-		switch fieldName {
-		case "slice":
-			currentObjectPtr = globalTestObjectMap[fieldName]
-			fallthrough
-		case "map":
-			currentObjectPtr = globalTestObjectMap[fieldName]
-			fallthrough
-		case "struct":
-			currentObjectPtr = globalTestObjectMap[fieldName]
-			fallthrough
-		default:
-			// todo: 删除log信息
+	case operation.PRT:
+		operation.Print(currentObjectPtr)
+	case operation.USE:
+		object := registry.GetObject(fieldName)
+		if object != nil  {
+			currentObjectPtr = object
 			fmt.Println("ok!")
+		}else{
+			fmt.Printf("object %s not found in registry\n", fieldName)
 		}
+	case operation.LIST:
+		fmt.Println(registry.GetAllNames())
 	default:
 		cmd := exec.Command("/bin/sh", "-c", command)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			// todo: 删除log信息
 			fmt.Printf("Got error: %s\n", err.Error())
 		}
 	}
@@ -168,38 +131,32 @@ func operationCompleter(d prompt.Document) []prompt.Suggest{
 		{Text: "get", Description: "获取操作对象某个字段"},
 		{Text: "set", Description: "设置操作对象某个字段上的值"},
 		{Text: "delete", Description: "删除操作对象某个字段(map或slice)"},
-		{Text: "use", Description: "切换当前对象(slice, map, struct)"},
+		{Text: "use", Description: "切换当前对象"},
 		{Text: "quit", Description: "退出"},
 	}
-	if getCurrentObjectType() == reflect.Struct {
+	if operation.GetObjectRuntimeType(currentObjectPtr) == reflect.Struct {
 		ops = append(ops[:3], ops[4:]...)
 	}
 	return prompt.FilterHasPrefix(ops, d.GetWordBeforeCursor(), true)
 }
 
-func getCurrentObjectType() reflect.Kind{
-	return reflect.Indirect(reflect.ValueOf(currentObjectPtr)).Kind()
-}
-
 // map or struct 的字段提示
 func fieldNameCompleter(d prompt.Document,object interface{}) []prompt.Suggest{
+	if currentObjectPtr == nil {
+		return []prompt.Suggest{{Text: "当前操作对象为空"} }
+	}
 	wordBeforeCursor := d.GetWordBeforeCursor()
 	nestFieldNames := strings.Split(wordBeforeCursor, ".")
-	switch getCurrentObjectType() {
+	switch operation.GetObjectRuntimeType(currentObjectPtr) {
 	case reflect.Struct:
 		dummyObject := object
-		if len(nestFieldNames) != 1 {
-			for index, fieldName := range nestFieldNames{
-				if index == len(nestFieldNames)-1{
-					continue
-				}
-				realObject := reflect.Indirect(reflect.ValueOf(dummyObject))
-				nestField := realObject.FieldByName(fieldName)
-				if !nestField.IsValid() {
-					return nilCompleter(d)
-				}
-				dummyObject = nestField.Interface()
+		if strings.Contains(wordBeforeCursor, ".") {
+			nestFieldName := wordBeforeCursor[:strings.LastIndex(wordBeforeCursor, ".")]
+			nestField := operation.GetField(object.(SimpleData), nestFieldName)
+			if nestField == nil {
+				return nilCompleter(d)
 			}
+			dummyObject = nestField
 		}
 		return prompt.FilterHasPrefix(
 			getFieldSuggest(getStructFieldNames(dummyObject)),
@@ -212,11 +169,15 @@ func fieldNameCompleter(d prompt.Document,object interface{}) []prompt.Suggest{
 	return nilCompleter(d)
 }
 
+
 func objectNameCompleter(d prompt.Document) []prompt.Suggest{
-	objectSuggests := []prompt.Suggest{
-		{Text: "slice"},
-		{Text: "map"},
-		{Text: "struct"},
+	names := registry.GetAllNames()
+	objectSuggests := make([]prompt.Suggest, 0 , len(names))
+	for _, name := range names{
+		objectSuggests = append(objectSuggests, prompt.Suggest{
+			Text:        name,
+			Description: operation.GetObjectFieldType(registry.GetObject(name), ""),
+		})
 	}
 	return prompt.FilterHasPrefix(objectSuggests, d.GetWordBeforeCursor(), true)
 }
@@ -228,6 +189,7 @@ func nilCompleter(d prompt.Document)[]prompt.Suggest{
 
 // command 提示(main)
 func completer(d prompt.Document) []prompt.Suggest {
+
 	if strings.Index(d.TextBeforeCursor(), " ") < 0 {
 		return operationCompleter(d)
 	}else {
@@ -244,21 +206,24 @@ func completer(d prompt.Document) []prompt.Suggest {
 }
 
 func isDataOperation(ops string) bool {
-	if ops == GET || ops == SET || ops == DEL{
+	ops = strings.ToLower(ops)
+	if ops == operation.GET || ops == operation.SET || ops == operation.DEL{
 		return true
 	}
 	return false
 }
 
 func isChangeOperation(ops string) bool {
-	return ops == USE
+	ops = strings.ToLower(ops)
+	return ops == operation.USE
 }
 
 func getFieldSuggest(fieldNames []string)[]prompt.Suggest{
 	var fieldNameSuggest []prompt.Suggest
-	for _, item := range fieldNames{
+	for _, name := range fieldNames{
 		fieldNameSuggest = append(fieldNameSuggest, prompt.Suggest{
-			Text:        item,
+			Text: name,
+			Description: operation.GetObjectFieldType(currentObjectPtr, name),
 		})
 	}
 	return fieldNameSuggest
